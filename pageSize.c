@@ -4,10 +4,14 @@
 
 size_t page_size = 0;
 
-void init_page_size() {
+int init_page_size() {
+    
     if(page_size == 0) {
         page_size = sysconf(_SC_PAGESIZE);
         printf("page size = %ld\n", page_size);
     }
+
+   return page_size;
+
 }
 

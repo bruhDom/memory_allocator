@@ -1,13 +1,32 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
 #include "pageSize.h"
+#include <string.h>
 #include "mem_allocator.h"
+
 
 int main() {
 
-    init_page_size(); //tells us the size of a page on our system;
+    int page_size = init_page_size(); //tells us the size of a page on our system;
 
-    void *memory = mem_alloc(4096);
+    void *memory = mem_alloc(page_size);
 
     printf("Memory block starting at: %p\n", memory);
+
+    memset(memory, 0xAA, page_size - sizeof(mem_block));
+
+    printf("0x%02X\n", ((uint8_t*)memory)[0]);
+
+    printf("sbrk(0): %p\n", sbrk(0));
+    
+    memory = sbrk(-page_size);
+    
+    printf("sbrk(0): %p\n", sbrk(0));
+
+
+    // printf("New memory block starting at: %p\n", memory);
+    
+    
 
 }

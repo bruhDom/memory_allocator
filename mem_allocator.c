@@ -10,7 +10,7 @@ void *mem_alloc(size_t mem_block_size) {
     memory.size = mem_block_size;
 
     void *block = sbrk(memory.size);
-    void *allocated_region = block + sizeof(memory);
+    void *allocated_region = block + sizeof(memory); // we want to return the pointer AFTER the header.
 
     return allocated_region;
 }
