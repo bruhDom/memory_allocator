@@ -12,5 +12,6 @@ typedef struct mem_block {
 } mem_block;
 
 void *mem_alloc(size_t mem_block_size);
+void free(void *memory);
 
 #endif

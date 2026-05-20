@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include "pageSize.h"
 #include <string.h>
+
+#include "pageSize.h"
 #include "mem_allocator.h"
 
 
@@ -26,7 +27,5 @@ int main() {
 
 
     // printf("New memory block starting at: %p\n", memory);
-    
-    
 
 }
