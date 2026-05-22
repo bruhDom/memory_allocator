@@ -12,8 +12,12 @@ typedef struct mem_block {
     int is_free;
 } mem_block;
 
+typedef struct free_list {
+    struct free_list *prev_free;
+    struct free_list *next_free;
+} free_list;
+
 void *mem_alloc(size_t mem_block_size);
 void free(void *memory);
-
 
 #endif

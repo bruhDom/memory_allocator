@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-
+#include <ctype.h>
 
 void *mem_alloc(size_t mem_block_size) {
 
@@ -32,11 +32,6 @@ void free(void *memory) {
     void* start_of_block = memory - sizeof(mem_block);
     mem_block *free_memory = (mem_block*)start_of_block;
     free_memory->is_free = 1;
-    printf("%p\n", free_memory);
-    printf("%d\n", free_memory->is_free);
     printf("size of mem block: %ld\n", sizeof(mem_block));
-
-
-
     
 }
