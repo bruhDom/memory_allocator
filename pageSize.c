@@ -4,7 +4,7 @@
 
 size_t page_size = 0;
 
-int init_page_size() {
+size_t init_page_size() {
     
     if(page_size == 0) {
         page_size = sysconf(_SC_PAGESIZE); // check the size of a page cause it could differ on different processors.
