@@ -11,9 +11,12 @@ int main() {
 
     int page_size = init_page_size(); //tells us the size of a page on our system;
 
-    void *memory1 = mem_alloc(4040);
-    malloc_print();
+    malloc_setfsm(FIRST_FIT);
+    void *memory1 = mem_alloc(60);
+    void *memory2 = mem_alloc(1000);
+    void *memory3 = mem_alloc(500);
 
+    malloc_print();
     return 0;
 
 }

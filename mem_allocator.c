@@ -10,6 +10,10 @@ static mem_block *block_head = NULL;
 static mem_block *block_tail = NULL;
 static free_list *free_head = NULL;
 
+static fsm_policies current_policy = FIRST_FIT;
+
+static const size_t MIN_BLOCK_SIZE = sizeof(mem_block) + sizeof(free_list);
+
 
 void *mem_alloc(size_t mem_block_size) {
 
@@ -21,30 +25,75 @@ void *mem_alloc(size_t mem_block_size) {
     size_t allocated_size = (requested_size + page_size - 1) & ~(page_size - 1);
 
 
-    if(block_head != NULL) {
+    switch (current_policy) {
+        case FIRST_FIT:
+        
+            if(block_head != NULL) {
+                free_list *block = free_head;
 
-        free_list *block = free_head;
-        while(block != NULL) {
+                while(block != NULL) {
+                    mem_block *header = (mem_block*)((char*)block - sizeof(mem_block)); // we convert to char* first as this is 1 byte. So when we do pointer arithmetic the sizeof type doesn't screw us over lol
 
-            mem_block *header = (mem_block*)((char*)block - sizeof(mem_block)); // we convert to char* first as this is 1 byte. So when we do pointer arithmetic the sizeof type doesn't screw us over lol
+                    if(header->size >= requested_size) { // If we have an already allocated block larger than what is being asked for, give them that block back
+                        header->is_free = 0;
+                        
+                        if(block->prev_free != NULL) { // If it is in the middle of a chain, we want the previous node to the point to node after current
+                            (block->prev_free)->next_free = block->next_free;
+                        } 
+                        else { 
+                            free_head = block->next_free;
+                        }
+                        if(block->next_free != NULL) { // Also again if it is in middle of node we can make next block point to current node's previous
+                            (block->next_free)->prev_free = block->prev_free;
+                        }
+                        // return the block
 
-            if(header->size >= allocated_size) { // If we have an already allocated block larger than what is being asked for, give them that block back
+                        return (void*)block;
+                    }
+
+                    block = block->next_free; 
+                }
+            }
+        break;
+        case BEST_FIT:
+            size_t best_size = SIZE_MAX;
+            
+
+            if(block_head != NULL) {
+                free_list *block = free_head;
+                free_list *best_block = block;
+
+                while(block != NULL) {
+                    
+                    mem_block *header = (mem_block*)((char*)block - sizeof(mem_block));
+
+                    if(header->size >= requested_size) {
+                        if(header->size - requested_size < best_size) {
+                            best_size = header->size - requested_size;
+                            best_block = block;
+                        }
+
+                    }
+                    block = block->next_free;
+
+                }
+                if(best_block->prev_free != NULL) {
+                    (best_block->prev_free)->next_free = best_block->next_free;
+                }
+                else {
+                    free_head = best_block->next_free;
+                }
+                if(best_block->next_free != NULL) {
+                    (best_block->next_free)->prev_free = best_block->prev_free;
+                }
+
+                
+                mem_block* header = (mem_block*)((char*)best_block - sizeof(mem_block));
                 header->is_free = 0;
-                if(block->prev_free != NULL) { // If it is in the middle of a chain, we want the previous node to the point to node after current
-                    (block->prev_free)->next_free = block->next_free;
-                } else { 
-                    free_head = block->next_free;
-                }
-                if(block->next_free != NULL) { // Also again if it is in middle of node we can make next block point to current node's previous
-                    (block->next_free)->prev_free = block->prev_free;
-                }
-                // return the block
-
-                return (void*)block;
+                return (void*)best_block;
             }
 
-            block = block->next_free; 
-        }
+        break;
     }
 
     void *block = sbrk(allocated_size);
@@ -57,40 +106,13 @@ void *mem_alloc(size_t mem_block_size) {
     size_t minimum_required_region = sizeof(mem_block) + sizeof(free_list);
 
     mem_block *memory = (mem_block*)block;
-    memory->size = requested_size;
+    memory->size = allocated_size;
     memory->is_free = 0;
     memory->next_pointer = NULL;
 
     // first, move to mem address for *after* header + data
 
-    if(leftover_region >= minimum_required_region) {
-        mem_block *leftover_region_header = (mem_block*)((char*)block + requested_size); // This gets us to start of new block
-        leftover_region_header->is_free = 1;
-        leftover_region_header->size = leftover_region;
-        
-        // Add the links between nodes. Leftover is now the new tail and the allocated block must point to leftover block
-        leftover_region_header->prev_pointer = memory;
-        memory->next_pointer = leftover_region_header;
-        block_tail = leftover_region_header;
-        leftover_region_header->next_pointer = NULL;
-
-        // Now we add leftover block to the free list
-
-        free_list* freed_leftover = (free_list*)((char*)leftover_region_header + sizeof(mem_block)); 
-
-        if(free_head == NULL) {
-            freed_leftover->next_free = NULL;
-            free_head = freed_leftover;
-        } else {
-            free_head->prev_free = freed_leftover;
-            freed_leftover->next_free = free_head;
-            free_head = freed_leftover;
-        }
-
-        free_head->prev_free = NULL;
-    }
-
-
+    
 
     if(block_head == NULL) { // If we have no head, then this memory block is the start of our list. Nothing comes before or after it
         block_head = memory;
@@ -103,12 +125,15 @@ void *mem_alloc(size_t mem_block_size) {
         block_tail = memory;
     }
 
+    split_blocks(memory, requested_size); // splits blocks and carves out leftover. Put into function cause its cleaner and i had issues before.
+   
+
     void *allocated_region = block + sizeof(mem_block); // we want to return the pointer AFTER the header.
 
     return allocated_region;
 }
 
-void free(void *memory) {
+void my_free(void *memory) {
     // If we free something, we store the pointer at the start of the region, since we can just overwrite the pointers when we request more memory
 
     void* start_of_block = memory - sizeof(mem_block);
@@ -116,7 +141,7 @@ void free(void *memory) {
     free_memory->is_free = 1;
 
     free_list* memory_block = (free_list*)memory; 
-
+    
     if(free_head == NULL) { // If the list is empty, start the free list at the first area of data we can write to. Nothing comes after the intial block, so that's NULL
         memory_block->next_free = NULL; 
         free_head = memory_block;
@@ -153,4 +178,48 @@ void malloc_print() { // Function to walk the block list and print out each bloc
         }
     }
 
+}
+
+void malloc_setfsm(fsm_policies policy) {
+    current_policy = policy;
+}
+
+void split_blocks(mem_block* header, size_t required_size) {
+    
+    size_t leftover_region = header->size - required_size;  
+
+    if(leftover_region >= MIN_BLOCK_SIZE) {
+        mem_block *leftover_region_header = (mem_block*)((char*)header + required_size); // This gets us to start of new block
+        leftover_region_header->is_free = 1;
+        leftover_region_header->size = leftover_region;
+        header->size = required_size;
+        
+        // Add the links between nodes. Leftover is now the new tail and the allocated block must point to leftover block
+        mem_block* temp_check = header->next_pointer;
+        if(temp_check != NULL) {
+            leftover_region_header->prev_pointer = header;
+            header->next_pointer = leftover_region_header;
+            leftover_region_header->next_pointer = temp_check;
+            temp_check->prev_pointer = leftover_region_header;
+        }
+        else {
+            leftover_region_header->prev_pointer = header;
+            header->next_pointer = leftover_region_header;
+            block_tail = leftover_region_header;
+        }
+
+        // Now we add leftover block to the free list
+
+        free_list* freed_leftover = (free_list*)((char*)leftover_region_header + sizeof(mem_block)); 
+
+        // Add to free list
+        if(free_head == NULL) {
+            freed_leftover->next_free = NULL;
+            free_head = freed_leftover;
+        } else {
+            free_head->prev_free = freed_leftover;
+            freed_leftover->next_free = free_head;
+            free_head = freed_leftover;
+        }
+    }
 }
