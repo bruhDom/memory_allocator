@@ -21,5 +21,6 @@ typedef struct free_list {
 
 void *mem_alloc(size_t mem_block_size);
 void free(void *memory);
+void malloc_print();
 
 #endif

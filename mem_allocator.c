@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <stdint.h>
 
 static mem_block *block_head = NULL;
 static mem_block *block_tail = NULL;
@@ -16,8 +17,8 @@ void *mem_alloc(size_t mem_block_size) {
     size = (size + 15) & ~(0xF); // rounds to nearest multiple of 16
     
     size_t page_size = init_page_size();
-    size_t allocated_size = size + sizeof(mem_block);
-    allocated_size = (allocated_size + page_size - 1) & ~(page_size - 1);
+    size_t requested_size = size + sizeof(mem_block);
+    size_t allocated_size = (requested_size + page_size - 1) & ~(page_size - 1);
 
 
     if(block_head != NULL) {
@@ -27,22 +28,22 @@ void *mem_alloc(size_t mem_block_size) {
 
             mem_block *header = (mem_block*)((char*)block - sizeof(mem_block)); // we convert to char* first as this is 1 byte. So when we do pointer arithmetic the sizeof type doesn't screw us over lol
 
-            if(header->size >= allocated_size) {
+            if(header->size >= allocated_size) { // If we have an already allocated block larger than what is being asked for, give them that block back
                 header->is_free = 0;
-                if(block->prev_free != NULL) {
+                if(block->prev_free != NULL) { // If it is in the middle of a chain, we want the previous node to the point to node after current
                     (block->prev_free)->next_free = block->next_free;
-                } else {
+                } else { 
                     free_head = block->next_free;
                 }
-                if(block->next_free != NULL) {
+                if(block->next_free != NULL) { // Also again if it is in middle of node we can make next block point to current node's previous
                     (block->next_free)->prev_free = block->prev_free;
                 }
                 // return the block
 
-                return block;
+                return (void*)block;
             }
 
-            block = block->next_free;
+            block = block->next_free; 
         }
     }
 
@@ -50,11 +51,45 @@ void *mem_alloc(size_t mem_block_size) {
     if(block == (void*) - 1)
         return NULL; // that just means that we've tried to allocate a region we are not supposed to access
 
+    // Now we need to break down block so we give user exact amount of memory, and then mark the remaining leftover memory as free.
+
+    size_t leftover_region = allocated_size - requested_size;
+    size_t minimum_required_region = sizeof(mem_block) + sizeof(free_list);
 
     mem_block *memory = (mem_block*)block;
-    memory->size = allocated_size;
+    memory->size = requested_size;
     memory->is_free = 0;
     memory->next_pointer = NULL;
+
+    // first, move to mem address for *after* header + data
+
+    if(leftover_region >= minimum_required_region) {
+        mem_block *leftover_region_header = (mem_block*)((char*)block + requested_size); // This gets us to start of new block
+        leftover_region_header->is_free = 1;
+        leftover_region_header->size = leftover_region;
+        
+        // Add the links between nodes. Leftover is now the new tail and the allocated block must point to leftover block
+        leftover_region_header->prev_pointer = memory;
+        memory->next_pointer = leftover_region_header;
+        block_tail = leftover_region_header;
+        leftover_region_header->next_pointer = NULL;
+
+        // Now we add leftover block to the free list
+
+        free_list* freed_leftover = (free_list*)((char*)leftover_region_header + sizeof(mem_block)); 
+
+        if(free_head == NULL) {
+            freed_leftover->next_free = NULL;
+            free_head = freed_leftover;
+        } else {
+            free_head->prev_free = freed_leftover;
+            freed_leftover->next_free = free_head;
+            free_head = freed_leftover;
+        }
+
+        free_head->prev_free = NULL;
+    }
+
 
 
     if(block_head == NULL) { // If we have no head, then this memory block is the start of our list. Nothing comes before or after it
@@ -97,4 +132,25 @@ void free(void *memory) {
 
     printf("size of mem block: %ld\n", sizeof(mem_block));
     
+}
+
+void malloc_print() { // Function to walk the block list and print out each block and their information
+    
+    static uint16_t i = 1;
+
+    const char* free_states[] = {"USED", "FREE"}; 
+
+    printf("\n ...beep boop... -- [CURRENT MEMORY STATE] -- ...beep boop...\n\n");
+
+    if(block_head != NULL) {
+
+        mem_block* block = block_head;
+
+        while(block != NULL) {
+
+            printf("[BLOCK %p - %p] %ld [%s]\n", (void*)block, (void*)((char*)block + block->size), block->size, free_states[block->is_free]);
+            block = block->next_pointer;
+        }
+    }
+
 }
