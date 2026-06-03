@@ -1,7 +1,7 @@
 # --- Configuration ---------------------------------------------------------
 BIN     := myalloc
 CC      := gcc
-CFLAGS  := -std=c11 -O0 -g -D_GNU_SOURCE
+CFLAGS  := -std=c11 -Wall -Wextra -O0 -g -D_GNU_SOURCE
 LDFLAGS :=
 
 # --- Auto-discovered files -------------------------------------------------

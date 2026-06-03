@@ -11,8 +11,8 @@ static mem_block *block_tail = NULL;
 static free_list *free_head = NULL;
 
 static fsm_policies current_policy = FIRST_FIT;
-
 static const size_t MIN_BLOCK_SIZE = sizeof(mem_block) + sizeof(free_list);
+
 
 
 void *mem_alloc(size_t mem_block_size) {
@@ -94,6 +94,41 @@ void *mem_alloc(size_t mem_block_size) {
             }
 
         break;
+        case WORST_FIT:
+            size_t worst_size = 0;
+
+            if(block_head != NULL) {
+                free_list* block = free_head;
+                free_list* worst_block = block;
+
+                while(block != NULL) {
+                    mem_block* header = (mem_block*)((char*)block - sizeof(mem_block));
+
+                    if(header->size >= requested_size) {
+                        if(header->size > worst_size) {
+                            worst_size = header->size;
+                            worst_block = block;
+                        }
+                    }
+
+                    block = block->next_free;
+                }
+                if(worst_block->prev_free != NULL) {
+                    (worst_block->prev_free)->next_free = worst_block->next_free;
+                } 
+                else {
+                    free_head = worst_block->next_free;
+                }
+                if(worst_block->next_free != NULL) {
+                    (worst_block->next_free)->prev_free = worst_block->prev_free;
+                }
+                
+                mem_block* header = (mem_block*)((char*)worst_block - sizeof(mem_block));
+                header->is_free = 0;
+                return (void*)worst_block;
+
+            }
+        break;      
     }
 
     void *block = sbrk(allocated_size);
@@ -101,9 +136,6 @@ void *mem_alloc(size_t mem_block_size) {
         return NULL; // that just means that we've tried to allocate a region we are not supposed to access
 
     // Now we need to break down block so we give user exact amount of memory, and then mark the remaining leftover memory as free.
-
-    size_t leftover_region = allocated_size - requested_size;
-    size_t minimum_required_region = sizeof(mem_block) + sizeof(free_list);
 
     mem_block *memory = (mem_block*)block;
     memory->size = allocated_size;
@@ -161,8 +193,6 @@ void my_free(void *memory) {
 
 void malloc_print() { // Function to walk the block list and print out each block and their information
     
-    static uint16_t i = 1;
-
     const char* free_states[] = {"USED", "FREE"}; 
 
     printf("\n ...beep boop... -- [CURRENT MEMORY STATE] -- ...beep boop...\n\n");
