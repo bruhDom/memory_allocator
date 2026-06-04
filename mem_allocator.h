@@ -29,5 +29,6 @@ void my_free(void *memory);
 void malloc_print();
 void malloc_setfsm(fsm_policies policy);
 void split_blocks(mem_block *header, size_t required_size);
+void coalesce_blocks(mem_block *header);
 
 #endif

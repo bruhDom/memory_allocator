@@ -15,10 +15,15 @@ int main() {
     void *memory1 = mem_alloc(104);
     void *memory2 = mem_alloc(1048);
     void *memory3 = mem_alloc(552);
-    my_free(memory2);
 
-    malloc_setfsm(WORST_FIT);
-    void *memory4 = mem_alloc(256);
+    my_free(memory1);
+
+    malloc_print();
+    my_free(memory2);
+    my_free(memory3);
+
+    // malloc_setfsm(WORST_FIT);
+    // void *memory4 = mem_alloc(256);
 
     malloc_print();
     return 0;

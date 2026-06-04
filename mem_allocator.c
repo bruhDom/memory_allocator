@@ -13,8 +13,6 @@ static free_list *free_head = NULL;
 static fsm_policies current_policy = FIRST_FIT;
 static const size_t MIN_BLOCK_SIZE = sizeof(mem_block) + sizeof(free_list);
 
-
-
 void *mem_alloc(size_t mem_block_size) {
 
     size_t size = mem_block_size < 48 ? 48 : mem_block_size;
@@ -172,6 +170,8 @@ void my_free(void *memory) {
     mem_block *free_memory = (mem_block*)start_of_block;
     free_memory->is_free = 1;
 
+    coalesce_blocks(free_memory);
+
     free_list* memory_block = (free_list*)memory; 
     
     if(free_head == NULL) { // If the list is empty, start the free list at the first area of data we can write to. Nothing comes after the intial block, so that's NULL
@@ -187,8 +187,6 @@ void my_free(void *memory) {
     free_head->prev_free = NULL;
 
 
-    printf("size of mem block: %ld\n", sizeof(mem_block));
-    
 }
 
 void malloc_print() { // Function to walk the block list and print out each block and their information
@@ -214,11 +212,11 @@ void malloc_setfsm(fsm_policies policy) {
     current_policy = policy;
 }
 
-void split_blocks(mem_block* header, size_t required_size) {
+void split_blocks(mem_block* header, size_t required_size) { // 
     
     size_t leftover_region = header->size - required_size;  
 
-    if(leftover_region >= MIN_BLOCK_SIZE) {
+    if(leftover_region >= MIN_BLOCK_SIZE) { // Make sure that the region is big enough such that it can store a header
         mem_block *leftover_region_header = (mem_block*)((char*)header + required_size); // This gets us to start of new block
         leftover_region_header->is_free = 1;
         leftover_region_header->size = leftover_region;
@@ -226,13 +224,13 @@ void split_blocks(mem_block* header, size_t required_size) {
         
         // Add the links between nodes. Leftover is now the new tail and the allocated block must point to leftover block
         mem_block* temp_check = header->next_pointer;
-        if(temp_check != NULL) {
+        if(temp_check != NULL) { // If the header is not at the tail, then we want to append the leftover block into block list
             leftover_region_header->prev_pointer = header;
             header->next_pointer = leftover_region_header;
             leftover_region_header->next_pointer = temp_check;
             temp_check->prev_pointer = leftover_region_header;
         }
-        else {
+        else { // If it is the tail, then the new leftover is now the tail
             leftover_region_header->prev_pointer = header;
             header->next_pointer = leftover_region_header;
             block_tail = leftover_region_header;
@@ -252,4 +250,65 @@ void split_blocks(mem_block* header, size_t required_size) {
             free_head = freed_leftover;
         }
     }
+}
+
+void coalesce_blocks(mem_block *header) {
+
+    if(header->next_pointer != NULL) {
+        if(header->next_pointer->is_free) {
+            header->size += header->next_pointer->size;
+
+            mem_block *coalesced_block = header->next_pointer;
+            if(coalesced_block->next_pointer != NULL) {
+                header->next_pointer = coalesced_block->next_pointer;
+                (coalesced_block->next_pointer)->prev_pointer = header;
+            }
+            else {
+                header->next_pointer = NULL;
+                block_tail = header;
+            }
+
+            free_list* old_block = (free_list*)((char*)coalesced_block + sizeof(mem_block));
+
+            if(old_block->next_free != NULL) {
+                (old_block->next_free)->prev_free = old_block->prev_free;
+            }
+            if(old_block->prev_free != NULL) {
+                (old_block->prev_free)->next_free = old_block->next_free;
+            }
+            else {
+                free_head = old_block->next_free;
+            }
+
+        }
+    }
+    if(header->prev_pointer != NULL) {
+        if(header->prev_pointer->is_free) {
+            header->prev_pointer->size += header->size;
+
+            mem_block* new_block = header->prev_pointer;
+
+            if(header->next_pointer != NULL) {
+                new_block->next_pointer = header->next_pointer;
+                (header->next_pointer)->prev_pointer = new_block;
+            }
+            else {
+                new_block->next_pointer = NULL;
+                block_tail = new_block;
+            }
+
+            free_list* old_block = (free_list*)((char*)header + sizeof(mem_block));
+
+            if(old_block->next_free != NULL) {
+                (old_block->next_free)->prev_free = old_block->prev_free;
+            }
+            if(old_block->prev_free != NULL) {
+                (old_block->prev_free)->next_free = old_block->next_free;
+            }
+            else {
+                free_head = old_block->next_free;
+            }
+        }
+    }
+
 }
