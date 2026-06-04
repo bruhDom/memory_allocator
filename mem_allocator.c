@@ -45,6 +45,8 @@ void *mem_alloc(size_t mem_block_size) {
                             (block->next_free)->prev_free = block->prev_free;
                         }
                         // return the block
+                        
+                        split_blocks(header, requested_size); // splits blocks and carves out leftover. Put into function cause its cleaner and i had issues before.
 
                         return (void*)block;
                     }
@@ -59,7 +61,7 @@ void *mem_alloc(size_t mem_block_size) {
 
             if(block_head != NULL) {
                 free_list *block = free_head;
-                free_list *best_block = block;
+                free_list *best_block = NULL;
 
                 while(block != NULL) {
                     
@@ -75,20 +77,24 @@ void *mem_alloc(size_t mem_block_size) {
                     block = block->next_free;
 
                 }
-                if(best_block->prev_free != NULL) {
-                    (best_block->prev_free)->next_free = best_block->next_free;
-                }
-                else {
-                    free_head = best_block->next_free;
-                }
-                if(best_block->next_free != NULL) {
-                    (best_block->next_free)->prev_free = best_block->prev_free;
-                }
+                if(best_block != NULL) {
+                    if(best_block->prev_free != NULL) {
+                        (best_block->prev_free)->next_free = best_block->next_free;
+                    }
+                    else {
+                        free_head = best_block->next_free;
+                    }
+                    if(best_block->next_free != NULL) {
+                        (best_block->next_free)->prev_free = best_block->prev_free;
+                    }
 
-                
-                mem_block* header = (mem_block*)((char*)best_block - sizeof(mem_block));
-                header->is_free = 0;
-                return (void*)best_block;
+                    
+                    mem_block* header = (mem_block*)((char*)best_block - sizeof(mem_block));
+                    header->is_free = 0;
+                    split_blocks(header, requested_size); // splits blocks and carves out leftover. Put into function cause its cleaner and i had issues before.
+
+                    return (void*)best_block;
+                }
             }
 
         break;
@@ -111,24 +117,28 @@ void *mem_alloc(size_t mem_block_size) {
 
                     block = block->next_free;
                 }
-                if(worst_block->prev_free != NULL) {
-                    (worst_block->prev_free)->next_free = worst_block->next_free;
-                } 
-                else {
-                    free_head = worst_block->next_free;
+                if(worst_block != NULL) {
+                    if(worst_block->prev_free != NULL) {
+                        (worst_block->prev_free)->next_free = worst_block->next_free;
+                    } 
+                    else {
+                        free_head = worst_block->next_free;
+                    }
+                    if(worst_block->next_free != NULL) {
+                        (worst_block->next_free)->prev_free = worst_block->prev_free;
+                    }
+                    
+                    mem_block* header = (mem_block*)((char*)worst_block - sizeof(mem_block));
+                    header->is_free = 0;
+                    split_blocks(header, requested_size); // splits blocks and carves out leftover. Put into function cause its cleaner and i had issues before.
+
+                    return (void*)worst_block;
                 }
-                if(worst_block->next_free != NULL) {
-                    (worst_block->next_free)->prev_free = worst_block->prev_free;
-                }
-                
-                mem_block* header = (mem_block*)((char*)worst_block - sizeof(mem_block));
-                header->is_free = 0;
-                return (void*)worst_block;
 
             }
         break;      
     }
-
+    
     void *block = sbrk(allocated_size);
     if(block == (void*) - 1)
         return NULL; // that just means that we've tried to allocate a region we are not supposed to access
@@ -165,12 +175,11 @@ void *mem_alloc(size_t mem_block_size) {
 
 void my_free(void *memory) {
     // If we free something, we store the pointer at the start of the region, since we can just overwrite the pointers when we request more memory
-
+        
     void* start_of_block = memory - sizeof(mem_block);
     mem_block *free_memory = (mem_block*)start_of_block;
     free_memory->is_free = 1;
 
-    coalesce_blocks(free_memory);
 
     free_list* memory_block = (free_list*)memory; 
     
@@ -186,7 +195,7 @@ void my_free(void *memory) {
 
     free_head->prev_free = NULL;
 
-
+    coalesce_blocks(free_memory);
 }
 
 void malloc_print() { // Function to walk the block list and print out each block and their information
@@ -254,7 +263,9 @@ void split_blocks(mem_block* header, size_t required_size) { //
 
 void coalesce_blocks(mem_block *header) {
 
-    if(header->next_pointer != NULL) {
+    mem_block* end_block = header;
+
+    if(header->next_pointer != NULL) { // IM GOING INSANE WITH MEMORY AJSKDJHASIJDHASOINDNASOIDN
         if(header->next_pointer->is_free) {
             header->size += header->next_pointer->size;
 
@@ -265,7 +276,7 @@ void coalesce_blocks(mem_block *header) {
             }
             else {
                 header->next_pointer = NULL;
-                block_tail = header;
+                block_tail = header;    
             }
 
             free_list* old_block = (free_list*)((char*)coalesced_block + sizeof(mem_block));
@@ -285,6 +296,7 @@ void coalesce_blocks(mem_block *header) {
     if(header->prev_pointer != NULL) {
         if(header->prev_pointer->is_free) {
             header->prev_pointer->size += header->size;
+            end_block = header->prev_pointer;
 
             mem_block* new_block = header->prev_pointer;
 
@@ -311,4 +323,38 @@ void coalesce_blocks(mem_block *header) {
         }
     }
 
+    size_t remaining_memory = end_block->size % init_page_size();
+
+    if(end_block->next_pointer == NULL && (remaining_memory == 0 || remaining_memory >= MIN_BLOCK_SIZE)) {
+
+        if(remaining_memory >= MIN_BLOCK_SIZE) {
+            end_block->size = remaining_memory;
+        }
+        else if(remaining_memory == 0) { 
+
+            if(end_block->prev_pointer != NULL) {
+                (end_block->prev_pointer)->next_pointer = NULL;
+                block_tail = end_block->prev_pointer;
+            }
+            else {
+                block_head = NULL;
+                block_tail = NULL;
+            }
+            free_list *old_block = (free_list*)((char*)end_block + sizeof(mem_block));
+
+            if(old_block->next_free != NULL) {
+                (old_block->next_free)->prev_free = old_block->prev_free;
+            }
+            if(old_block->prev_free != NULL) {
+                (old_block->prev_free)->next_free = old_block->next_free;
+            }
+            else {
+                free_head = old_block->next_free;
+            }
+            
+            size_t amount_to_return = (end_block->size / init_page_size()) * init_page_size();
+            sbrk(-(amount_to_return));
+
+        }   
+    }
 }
