@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <stdint.h>
+#include <string.h>
 
 static mem_block *block_head = NULL;
 static mem_block *block_tail = NULL;
@@ -221,7 +222,7 @@ void malloc_setfsm(fsm_policies policy) {
     current_policy = policy;
 }
 
-void split_blocks(mem_block* header, size_t required_size) { // 
+void *split_blocks(mem_block* header, size_t required_size) { // 
     
     size_t leftover_region = header->size - required_size;  
 
@@ -258,7 +259,11 @@ void split_blocks(mem_block* header, size_t required_size) { //
             freed_leftover->next_free = free_head;
             free_head = freed_leftover;
         }
+
+        return (void*)leftover_region_header;
     }
+
+    return NULL;
 }
 
 void coalesce_blocks(mem_block *header) {
@@ -269,7 +274,7 @@ void coalesce_blocks(mem_block *header) {
         if(header->next_pointer->is_free) {
             header->size += header->next_pointer->size;
 
-            mem_block *coalesced_block = header->next_pointer;
+            mem_block *coalesced_block = header->next_pointer; // So we add blocks together, then remove the adjacent block from block list
             if(coalesced_block->next_pointer != NULL) {
                 header->next_pointer = coalesced_block->next_pointer;
                 (coalesced_block->next_pointer)->prev_pointer = header;
@@ -279,7 +284,7 @@ void coalesce_blocks(mem_block *header) {
                 block_tail = header;    
             }
 
-            free_list* old_block = (free_list*)((char*)coalesced_block + sizeof(mem_block));
+            free_list* old_block = (free_list*)((char*)coalesced_block + sizeof(mem_block)); // Also remove free adjacent block from free list
 
             if(old_block->next_free != NULL) {
                 (old_block->next_free)->prev_free = old_block->prev_free;
@@ -293,7 +298,7 @@ void coalesce_blocks(mem_block *header) {
 
         }
     }
-    if(header->prev_pointer != NULL) {
+    if(header->prev_pointer != NULL) { // If we have a free block before it, then the current block merges INTO that block
         if(header->prev_pointer->is_free) {
             header->prev_pointer->size += header->size;
             end_block = header->prev_pointer;
@@ -309,7 +314,7 @@ void coalesce_blocks(mem_block *header) {
                 block_tail = new_block;
             }
 
-            free_list* old_block = (free_list*)((char*)header + sizeof(mem_block));
+            free_list* old_block = (free_list*)((char*)header + sizeof(mem_block)); // Again remove current block from free list
 
             if(old_block->next_free != NULL) {
                 (old_block->next_free)->prev_free = old_block->prev_free;
@@ -323,14 +328,14 @@ void coalesce_blocks(mem_block *header) {
         }
     }
 
-    size_t remaining_memory = end_block->size % init_page_size();
+    size_t remaining_memory = end_block->size % init_page_size(); // Now we need to return to the kernel, so integer division to tell us how many pages we can return
 
-    if(end_block->next_pointer == NULL && (remaining_memory == 0 || remaining_memory >= MIN_BLOCK_SIZE)) {
+    if(end_block->next_pointer == NULL && (remaining_memory == 0 || remaining_memory >= MIN_BLOCK_SIZE)) { // Must ensure that we are at end of chain and that it is safe to return block
 
         if(remaining_memory >= MIN_BLOCK_SIZE) {
-            end_block->size = remaining_memory;
+            end_block->size = remaining_memory; // If its bigger, then we just set the size to remaining_memory since the block still remains
         }
-        else if(remaining_memory == 0) { 
+        else if(remaining_memory == 0) {  // If its 0, then we are removing the block entirely
 
             if(end_block->prev_pointer != NULL) {
                 (end_block->prev_pointer)->next_pointer = NULL;
@@ -352,9 +357,76 @@ void coalesce_blocks(mem_block *header) {
                 free_head = old_block->next_free;
             }
             
-            size_t amount_to_return = (end_block->size / init_page_size()) * init_page_size();
+            size_t amount_to_return = (end_block->size / init_page_size()) * init_page_size(); // Now return a multiple of page size to kernel
             sbrk(-(amount_to_return));
 
         }   
+    }
+}
+
+void *reallocate(void* memory, size_t new_size) {
+
+    if(memory == NULL) {
+        return mem_alloc(new_size);
+    }
+    if(new_size == 0) {
+        my_free(memory);
+        return NULL;
+    }
+
+    mem_block *header = (mem_block*)((char*)memory - sizeof(mem_block));
+    size_t block_size = header->size;
+
+    size_t requested_size = new_size + sizeof(mem_block); // add on header as size requested does not include this.
+
+    if(requested_size <= block_size) { // If the size they want is smaller than or equal to the current block
+        mem_block* leftover = (mem_block*)split_blocks(header, requested_size);
+        if(leftover != NULL) coalesce_blocks(leftover);
+        return memory;
+    }
+    else { // Otherwise the block must be larger than the current size of the block
+
+        if(header->next_pointer != NULL && header->next_pointer->is_free) { // First check we have an adjacent block we can grow into if we are in middle of list
+            if(header->next_pointer->size + header->size >= requested_size) { // Next check that the sizes of these blocks are large enough to hold reallocation
+               
+                header->size += header->next_pointer->size; // extend intial block
+
+                // Fix block list now
+                mem_block* merged_block = header->next_pointer;
+                if(merged_block->next_pointer != NULL) { // If we are still in middle of list
+                    (merged_block->next_pointer)->prev_pointer = header;
+                    header->next_pointer = merged_block->next_pointer;
+                }
+                else {
+                    block_tail = header;
+                    header->next_pointer = NULL;
+                }
+
+                free_list* freed_block = (free_list*)((char*)merged_block + sizeof(mem_block)); // Now remove coalesced block from free list
+
+                if(freed_block->next_free != NULL) {
+                    (freed_block->next_free)->prev_free = freed_block->prev_free;
+                }
+                if(freed_block->prev_free != NULL) {
+                    (freed_block->prev_free)->next_free = freed_block->next_free;
+                }
+                else {
+                    free_head = freed_block->next_free;
+                }
+
+                split_blocks(header, requested_size); // Once we have removed from free_list, we split blocks into any leftover and then return the memory we reallocated
+                return memory;
+
+            }
+            else { // In the case where the adjacent block can't hold the memory, we then just allocate at the end
+                void* new_memory = mem_alloc(new_size);
+                size_t new_block_size = header->size - sizeof(mem_block); // Have to allocate them an amount *smaller* than the new block to ensure we dont have some memory leak
+                memcpy(new_memory, memory, new_block_size);
+                my_free(memory);
+                return new_memory;
+            }
+        }
+        void* new_memory = mem_alloc(new_size);
+        return new_memory;
     }
 }
